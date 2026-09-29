@@ -1,0 +1,126 @@
+﻿import type { Stock } from "@/types/portfolio";
+
+export interface MarketQuote {
+  cmp: number;
+  quoteTime: string | null;
+  source: "Yahoo Finance" | "Excel";
+  status: "success" | "fallback";
+}
+
+interface YahooChartResponse {
+  chart?: {
+    result?: Array<{
+      meta?: {
+        regularMarketPrice?: number;
+        regularMarketTime?: number;
+      };
+    }>;
+    error?: {
+      description?: string;
+    } | null;
+  };
+}
+
+export async function getMarketQuote(
+  stock: Stock
+): Promise<MarketQuote> {
+  try {
+    const url =
+      `https://query1.finance.yahoo.com/v8/finance/chart/` +
+      `${encodeURIComponent(YAHOO_SYMBOLS[stock.symbol] ?? stock.symbol)}?range=1d&interval=1m`;
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Accept: "application/json"
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Yahoo request failed: ${response.status}`);
+    }
+
+    const data =
+      (await response.json()) as YahooChartResponse;
+
+    const result = data.chart?.result?.[0];
+    const price = result?.meta?.regularMarketPrice;
+    const timestamp = result?.meta?.regularMarketTime;
+
+    if (
+      typeof price !== "number" ||
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      throw new Error("No valid market price returned");
+    }
+
+    return {
+      cmp: price,
+      quoteTime: timestamp
+        ? new Date(timestamp * 1000).toISOString()
+        : null,
+      source: "Yahoo Finance",
+      status: "success"
+    };
+  } catch {
+    return {
+      cmp: stock.cmp,
+      quoteTime: null,
+      source: "Excel",
+      status: "fallback"
+    };
+  }
+}
+
+export async function getMarketQuotes(
+  stocks: Stock[]
+): Promise<Map<number, MarketQuote>> {
+  const quotes = new Map<number, MarketQuote>();
+
+  // Process in small batches to reduce provider throttling.
+  for (let i = 0; i < stocks.length; i += 5) {
+    const batch = stocks.slice(i, i + 5);
+
+    const results = await Promise.all(
+      batch.map(async (stock) => ({
+        id: stock.id,
+        quote: await getMarketQuote(stock)
+      }))
+    );
+
+    for (const result of results) {
+      quotes.set(result.id, result.quote);
+    }
+  }
+
+  return quotes;
+}
+
+const YAHOO_SYMBOLS: Record<string, string> = {
+  "532174.BO": "ICICIBANK.BO",
+  "544252.BO": "BAJAJHFL.BO",
+  "542651.BO": "KPITTECH.BO",
+  "544028.BO": "TATATECH.BO",
+  "544107.BO": "BLSE.BO",
+  "532790.BO": "TANLA.BO",
+  "532540.BO": "TATACONSUM.BO",
+  "500331.BO": "PIDILITIND.BO",
+  "500400.BO": "TATAPOWER.BO",
+  "542323.BO": "KPIGREEN.BO",
+  "532667.BO": "SUZLON.BO",
+  "542851.BO": "GENSOL.BO",
+  "543517.BO": "HARIOMPIPE.BO",
+  "542652.BO": "POLYCAB.BO",
+  "543318.BO": "CLEAN.BO",
+  "506401.BO": "DEEPAKNTR.BO",
+  "541557.BO": "FINEORG.BO",
+  "533282.BO": "GRAVITA.BO",
+  "540719.BO": "SBILIFE.BO",
+  "500209.BO": "INFY.BO",
+  "543237.BO": "HAPPSTMNDS.BO",
+  "543272.BO": "EASEMYTRIP.BO"
+};
+
